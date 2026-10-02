@@ -1,14 +1,5 @@
 PRAGMA foreign_keys = ON;
 
--- ============================================================
--- BLUESTOCK MF - DAY 2 STAR SCHEMA
--- ============================================================
-
--- ============================================================
--- 1. FUND DIMENSION
--- Source: 01_fund_master.csv
--- ============================================================
-
 CREATE TABLE IF NOT EXISTS dim_fund (
     amfi_code       TEXT PRIMARY KEY,
     scheme_name     TEXT NOT NULL,
@@ -18,12 +9,6 @@ CREATE TABLE IF NOT EXISTS dim_fund (
     risk_grade      TEXT,
     is_active       INTEGER DEFAULT 1
 );
-
-
--- ============================================================
--- 2. DATE DIMENSION
--- Dates are derived from the source datasets.
--- ============================================================
 
 CREATE TABLE IF NOT EXISTS dim_date (
     date_id      TEXT PRIMARY KEY,
@@ -37,23 +22,11 @@ CREATE TABLE IF NOT EXISTS dim_date (
     is_holiday   INTEGER DEFAULT 0
 );
 
-
--- ============================================================
--- 3. INVESTOR DIMENSION
--- Source: 08_investor_transactions.csv
--- ============================================================
-
 CREATE TABLE IF NOT EXISTS dim_investor (
     investor_id TEXT PRIMARY KEY,
     state       TEXT,
     kyc_status  TEXT
 );
-
-
--- ============================================================
--- 4. NAV FACT
--- Source: 02_nav_history.csv
--- ============================================================
 
 CREATE TABLE IF NOT EXISTS fact_nav (
     nav_id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,12 +42,6 @@ CREATE TABLE IF NOT EXISTS fact_nav (
 
     UNIQUE(amfi_code, date_id)
 );
-
-
--- ============================================================
--- 5. TRANSACTION FACT
--- Source: 08_investor_transactions.csv
--- ============================================================
 
 CREATE TABLE IF NOT EXISTS fact_transactions (
     transaction_id   TEXT PRIMARY KEY,
@@ -99,12 +66,6 @@ CREATE TABLE IF NOT EXISTS fact_transactions (
     FOREIGN KEY (date_id)
         REFERENCES dim_date(date_id)
 );
-
-
--- ============================================================
--- 6. PERFORMANCE FACT
--- Source: 07_scheme_performance.csv
--- ============================================================
 
 CREATE TABLE IF NOT EXISTS fact_performance (
     performance_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,32 +96,16 @@ CREATE TABLE IF NOT EXISTS fact_performance (
     UNIQUE(amfi_code, date_id)
 );
 
-
--- ============================================================
--- 7. AUM FACT
--- Source: 03_aum_by_fund_house.csv
---
--- IMPORTANT:
--- The actual file has:
--- date
--- fund_house
--- aum_lakh_crore
--- aum_crore
--- num_schemes
---
--- Therefore this table does NOT require year/reporting_year.
--- ============================================================
-
 CREATE TABLE IF NOT EXISTS fact_aum (
-    aum_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    aum_id      INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    amfi_code       TEXT,
-    fund_house      TEXT NOT NULL,
-    date_id         TEXT NOT NULL,
+    amfi_code   TEXT,
+    fund_house  TEXT NOT NULL,
+    date_id     TEXT NOT NULL,
 
-    aum_crore      REAL,
+    aum_crore   REAL,
     aum_lakh_crore REAL,
-    num_schemes    INTEGER,
+    num_schemes INTEGER,
 
     FOREIGN KEY (amfi_code)
         REFERENCES dim_fund(amfi_code),
@@ -169,30 +114,17 @@ CREATE TABLE IF NOT EXISTS fact_aum (
         REFERENCES dim_date(date_id)
 );
 
-
--- ============================================================
--- INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_nav_amfi_date
 ON fact_nav(amfi_code, date_id);
-
 
 CREATE INDEX IF NOT EXISTS idx_transaction_amfi_date
 ON fact_transactions(amfi_code, date_id);
 
-
 CREATE INDEX IF NOT EXISTS idx_transaction_investor
 ON fact_transactions(investor_id);
-
 
 CREATE INDEX IF NOT EXISTS idx_performance_amfi_date
 ON fact_performance(amfi_code, date_id);
 
-
 CREATE INDEX IF NOT EXISTS idx_aum_fund_house_date
 ON fact_aum(fund_house, date_id);
-
-
-CREATE INDEX IF NOT EXISTS idx_aum_amfi_date
-ON fact_aum(amfi_code, date_id);

@@ -3,12 +3,8 @@
 -- ============================================================
 
 
--- ============================================================
--- 1. TOP 5 FUNDS BY AUM
---
--- Scheme-level AUM comes from 07_scheme_performance.csv.
--- It is stored in fact_performance.aum_crore.
--- ============================================================
+-- 1. Top 5 funds by scheme-level AUM
+-- AUM comes from 07_scheme_performance.csv.
 
 SELECT
     f.amfi_code,
@@ -23,89 +19,91 @@ LIMIT 5;
 
 
 -- ============================================================
--- 2. AVERAGE NAV PER MONTH
+-- 2. Average NAV per month
 -- ============================================================
 
 SELECT
-    f.amfi_code,
-    f.scheme_name,
-    strftime('%Y-%m', n.date_id) AS month,
+    substr(n.date_id, 1, 7) AS month,
     ROUND(AVG(n.nav), 4) AS average_nav
 FROM fact_nav n
-JOIN dim_fund f
-    ON f.amfi_code = n.amfi_code
-GROUP BY
-    f.amfi_code,
-    f.scheme_name,
-    month
-ORDER BY
-    f.amfi_code,
-    month;
+GROUP BY substr(n.date_id, 1, 7)
+ORDER BY month;
 
 
 -- ============================================================
--- 3. SIP YEAR-OVER-YEAR GROWTH
+-- 3. SIP year-over-year growth
 -- ============================================================
 
-WITH sip_by_year AS (
+WITH yearly_sip AS (
 
     SELECT
-        strftime('%Y', date_id) AS year,
-        SUM(amount) AS total_sip
-    FROM fact_transactions
-    WHERE transaction_type = 'SIP'
-    GROUP BY year
+        d.year,
+        SUM(t.amount) AS sip_amount
+    FROM fact_transactions t
+    JOIN dim_date d
+        ON t.date_id = d.date_id
+    WHERE t.transaction_type = 'SIP'
+    GROUP BY d.year
 ),
 
-sip_with_previous AS (
+growth AS (
 
     SELECT
         year,
-        total_sip,
-        LAG(total_sip)
-            OVER (ORDER BY year) AS previous_year_sip
-    FROM sip_by_year
+        sip_amount,
+        LAG(sip_amount)
+            OVER (
+                ORDER BY year
+            ) AS previous_year_sip
+    FROM yearly_sip
 )
 
 SELECT
     year,
-    ROUND(total_sip, 2) AS total_sip,
-    ROUND(previous_year_sip, 2) AS previous_year_sip,
+    ROUND(sip_amount, 2) AS sip_amount,
+    ROUND(previous_year_sip, 2)
+        AS previous_year_sip,
 
-    CASE
-        WHEN previous_year_sip IS NULL
-             OR previous_year_sip = 0
-        THEN NULL
+    ROUND(
+        CASE
+            WHEN previous_year_sip IS NULL
+                 OR previous_year_sip = 0
+            THEN NULL
 
-        ELSE ROUND(
-            100.0 *
-            (total_sip - previous_year_sip)
-            / previous_year_sip,
-            2
-        )
-    END AS yoy_growth_pct
+            ELSE
+                (
+                    (sip_amount - previous_year_sip)
+                    / previous_year_sip
+                ) * 100
+        END,
+        2
+    ) AS yoy_growth_pct
 
-FROM sip_with_previous
+FROM growth
 ORDER BY year;
 
 
 -- ============================================================
--- 4. TRANSACTIONS BY STATE
+-- 4. Transactions by state
 -- ============================================================
 
 SELECT
     i.state,
-    COUNT(*) AS transaction_count,
-    ROUND(SUM(t.amount), 2) AS total_amount
+    COUNT(t.transaction_id)
+        AS transaction_count,
+    ROUND(
+        SUM(t.amount),
+        2
+    ) AS total_amount
 FROM fact_transactions t
 JOIN dim_investor i
-    ON i.investor_id = t.investor_id
+    ON t.investor_id = i.investor_id
 GROUP BY i.state
 ORDER BY total_amount DESC;
 
 
 -- ============================================================
--- 5. FUNDS WITH EXPENSE RATIO < 1%
+-- 5. Funds with expense ratio below 1%
 -- ============================================================
 
 SELECT
@@ -114,145 +112,102 @@ SELECT
     p.expense_ratio
 FROM fact_performance p
 JOIN dim_fund f
-    ON f.amfi_code = p.amfi_code
+    ON p.amfi_code = f.amfi_code
 WHERE p.expense_ratio < 1.0
 ORDER BY p.expense_ratio ASC;
 
 
 -- ============================================================
--- 6. REDEMPTION-TO-INFLOW RATIO BY FUND
+-- 6. Top 5 funds by transaction amount
 -- ============================================================
 
 SELECT
     f.amfi_code,
     f.scheme_name,
-
-    SUM(
-        CASE
-            WHEN t.transaction_type = 'Redemption'
-            THEN t.amount
-            ELSE 0
-        END
-    ) AS total_redemptions,
-
-    SUM(
-        CASE
-            WHEN t.transaction_type IN ('SIP', 'Lumpsum')
-            THEN t.amount
-            ELSE 0
-        END
-    ) AS total_inflows,
-
+    COUNT(t.transaction_id)
+        AS transaction_count,
     ROUND(
-        SUM(
-            CASE
-                WHEN t.transaction_type = 'Redemption'
-                THEN t.amount
-                ELSE 0
-            END
-        ) * 1.0
-        /
-        NULLIF(
-            SUM(
-                CASE
-                    WHEN t.transaction_type IN ('SIP', 'Lumpsum')
-                    THEN t.amount
-                    ELSE 0
-                END
-            ),
-            0
-        ),
+        SUM(t.amount),
         2
-    ) AS redemption_to_inflow_ratio
-
+    ) AS total_transaction_amount
 FROM fact_transactions t
 JOIN dim_fund f
-    ON f.amfi_code = t.amfi_code
-
+    ON t.amfi_code = f.amfi_code
 GROUP BY
     f.amfi_code,
     f.scheme_name
-
-ORDER BY redemption_to_inflow_ratio DESC;
-
-
--- ============================================================
--- 7. FUNDS BY 1-YEAR RETURN
--- ============================================================
-
-SELECT
-    f.amfi_code,
-    f.scheme_name,
-    p.return_1y
-FROM fact_performance p
-JOIN dim_fund f
-    ON f.amfi_code = p.amfi_code
-WHERE p.return_1y IS NOT NULL
-ORDER BY p.return_1y DESC
+ORDER BY total_transaction_amount DESC
 LIMIT 5;
 
 
 -- ============================================================
--- 8. MONTHLY SIP COUNT AND AVERAGE TICKET SIZE
--- ============================================================
-
-SELECT
-    strftime('%Y-%m', date_id) AS month,
-    COUNT(*) AS sip_count,
-    ROUND(AVG(amount), 2) AS average_sip_amount,
-    ROUND(SUM(amount), 2) AS total_sip_amount
-FROM fact_transactions
-WHERE transaction_type = 'SIP'
-GROUP BY month
-ORDER BY month;
-
-
--- ============================================================
--- 9. KYC STATUS DISTRIBUTION
--- ============================================================
-
-SELECT
-    i.kyc_status,
-    COUNT(DISTINCT i.investor_id) AS investor_count
-FROM dim_investor i
-JOIN fact_transactions t
-    ON t.investor_id = i.investor_id
-GROUP BY i.kyc_status
-ORDER BY investor_count DESC;
-
-
--- ============================================================
--- 10. NAV RANGE PER FUND
+-- 7. Latest NAV for each fund
 -- ============================================================
 
 SELECT
     f.amfi_code,
     f.scheme_name,
-
-    MIN(n.nav) AS minimum_nav,
-    MAX(n.nav) AS maximum_nav,
-
-    ROUND(
-        MAX(n.nav) - MIN(n.nav),
-        4
-    ) AS nav_range,
-
-    ROUND(
-        (
-            MAX(n.nav) - MIN(n.nav)
-        )
-        /
-        NULLIF(MIN(n.nav), 0)
-        * 100,
-        2
-    ) AS range_pct_of_min
-
+    n.date_id,
+    n.nav
 FROM fact_nav n
 JOIN dim_fund f
-    ON f.amfi_code = n.amfi_code
+    ON n.amfi_code = f.amfi_code
+WHERE n.date_id = (
+    SELECT MAX(n2.date_id)
+    FROM fact_nav n2
+    WHERE n2.amfi_code = n.amfi_code
+)
+ORDER BY n.nav DESC;
 
-GROUP BY
+
+-- ============================================================
+-- 8. Fund performance and expense ratio
+-- ============================================================
+
+SELECT
     f.amfi_code,
-    f.scheme_name
+    f.scheme_name,
+    p.return_1y,
+    p.return_3y,
+    p.return_5y,
+    p.expense_ratio
+FROM fact_performance p
+JOIN dim_fund f
+    ON p.amfi_code = f.amfi_code
+ORDER BY p.return_1y DESC;
 
-ORDER BY range_pct_of_min DESC;
+
+-- ============================================================
+-- 9. Fund-house AUM
+-- ============================================================
+
+SELECT
+    fund_house,
+    ROUND(
+        SUM(aum_crore),
+        2
+    ) AS total_aum_crore,
+    SUM(num_schemes)
+        AS total_schemes
+FROM fact_aum
+GROUP BY fund_house
+ORDER BY total_aum_crore DESC;
+
+
+-- ============================================================
+-- 10. Transaction count and amount by KYC status
+-- ============================================================
+
+SELECT
+    i.kyc_status,
+    COUNT(t.transaction_id)
+        AS transaction_count,
+    ROUND(
+        SUM(t.amount),
+        2
+    ) AS total_amount
+FROM fact_transactions t
+JOIN dim_investor i
+    ON t.investor_id = i.investor_id
+GROUP BY i.kyc_status
+ORDER BY total_amount DESC;

@@ -219,3 +219,6 @@ __marimo__/
 
 # Generated live NAV API files
 data/raw/nav_*.csv
+
+# SQLite database files
+*.db

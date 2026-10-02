@@ -222,3 +222,5 @@ data/raw/nav_*.csv
 
 # SQLite database files
 *.db
+
+notebooks/05_advanced_analytics_executed.ipynb
